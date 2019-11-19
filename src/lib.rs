@@ -1,5 +1,5 @@
 use crate::AccountRelation::{Direct, Reseller};
-use std::fmt::{Error, Formatter};
+use std::fmt::Formatter;
 
 pub type Result<T> = ::std::result::Result<T, Box<AdsTxtError>>;
 
@@ -26,12 +26,17 @@ impl std::fmt::Display for AdsTxtError {
     }
 }
 
+#[derive(Debug, Eq, PartialEq)]
 pub struct AdsTxt {
     pub records: Vec<DataRecord>,
     pub variables: Vec<Variable>,
 }
 
-pub type Variable = (String, String);
+#[derive(Debug, Eq, PartialEq)]
+pub struct Variable {
+    pub name: String,
+    pub value: String,
+}
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum AccountRelation {
@@ -41,7 +46,7 @@ pub enum AccountRelation {
 
 impl AccountRelation {
     fn parse(text: &str) -> Result<AccountRelation> {
-        let relation = text.to_lowercase();
+        let relation = text.trim().to_lowercase();
 
         if &relation == "direct" {
             Ok(Direct)
@@ -53,6 +58,7 @@ impl AccountRelation {
     }
 }
 
+#[derive(Debug, Eq, PartialEq)]
 pub struct DataRecord {
     pub domain: String,
     pub publisher_id: String,
@@ -61,36 +67,97 @@ pub struct DataRecord {
 }
 
 impl DataRecord {
+    pub fn new(
+        domain: &str,
+        publisher_id: &str,
+        acc_relation: AccountRelation,
+        cert_authority: Option<String>,
+    ) -> Self {
+        Self {
+            domain: domain.to_string(),
+            publisher_id: publisher_id.to_string(),
+            acc_relation,
+            cert_authority,
+        }
+    }
+
     pub fn parse(record_text: &str) -> Result<DataRecord> {
         let fields: Vec<&str> = record_text.split(',').collect();
 
         match fields.len() {
             3 => Ok(DataRecord {
-                domain: fields[0].to_string(),
-                publisher_id: fields[1].to_string(),
+                domain: fields[0].trim().to_string(),
+                publisher_id: fields[1].trim().to_string(),
                 acc_relation: AccountRelation::parse(fields[2])?,
                 cert_authority: None,
             }),
             4 => Ok(DataRecord {
-                domain: fields[0].to_string(),
-                publisher_id: fields[1].to_string(),
+                domain: fields[0].trim().to_string(),
+                publisher_id: fields[1].trim().to_string(),
                 acc_relation: AccountRelation::parse(fields[2])?,
-                cert_authority: None,
+                cert_authority: Some(fields[3].trim().to_string()),
             }),
-            _ => ads_txt_error(&format!("Invalid data record line: {}", record_text)),
+            _ => ads_txt_error(&format!("Invalid data record: {}", record_text)),
+        }
+    }
+}
+
+impl Variable {
+    pub fn new(name: &str, value: &str) -> Self {
+        Self {
+            name: name.to_string(),
+            value: value.to_string(),
+        }
+    }
+
+    pub fn parse(line: &str) -> Result<Variable> {
+        let fields: Vec<&str> = line.split('=').collect();
+
+        match fields.len() {
+            2 => Ok(Variable {
+                name: fields[0].trim().to_string(),
+                value: fields[1].trim().to_string(),
+            }),
+            _ => ads_txt_error(&format!("Invalid variable record: {}", line)),
         }
     }
 }
 
 impl AdsTxt {
-    fn parse(text: &str) -> Result<AdsTxt> {
-        unimplemented!()
+    #[inline]
+    fn is_comment(line: &str) -> bool {
+        line.starts_with("#")
+    }
+
+    pub fn parse(text: &str) -> Result<AdsTxt> {
+        let mut records: Vec<DataRecord> = vec![];
+        let mut variables: Vec<Variable> = vec![];
+
+        for line in text.lines() {
+            if Self::is_comment(line) {
+                continue;
+            }
+
+            if let Ok(record) = DataRecord::parse(line) {
+                records.push(record);
+                continue;
+            }
+
+            if let Ok(variable) = Variable::parse(line) {
+                variables.push(variable);
+                continue;
+            }
+
+            return ads_txt_error(&format!("Invalid ads.txt line: {}", line));
+        }
+
+        Ok(AdsTxt { records, variables })
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::AccountRelation;
+    use super::*;
 
     #[test]
     fn parsing_account_relation() {
@@ -122,6 +189,40 @@ mod tests {
 
     #[test]
     fn parsing_data_records() {
-        unimplemented!();
+        assert_eq!(
+            DataRecord::parse(""),
+            ads_txt_error("Invalid data record: ")
+        );
+        assert_eq!(
+            DataRecord::parse("greenadexchange.com, 12345, DIRECT, d75815a79"),
+            Ok(DataRecord::new(
+                "greenadexchange.com",
+                "12345",
+                AccountRelation::Direct,
+                Some("d75815a79".to_string())
+            ))
+        );
+
+        assert_eq!(
+            DataRecord::parse("blueadexchange.com, XF436, DIRECT"),
+            Ok(DataRecord::new(
+                "blueadexchange.com",
+                "XF436",
+                AccountRelation::Direct,
+                None
+            ))
+        )
+    }
+
+    #[test]
+    fn parsing_variable_records() {
+        assert_eq!(
+            Variable::parse(""),
+            ads_txt_error("Invalid variable record: ")
+        );
+        assert_eq!(
+            Variable::parse("subdomain=divisionone.example.com"),
+            Ok(Variable::new("subdomain", "divisionone.example.com"))
+        );
     }
 }
