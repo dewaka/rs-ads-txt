@@ -16,29 +16,17 @@ impl AdsTxtError {
     }
 }
 
-fn ads_txt_error<T>(message: &str) -> Result<T> {
-    Err(Box::new(AdsTxtError::new(message)))
-}
-
 impl std::fmt::Display for AdsTxtError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.message)
     }
 }
 
-#[derive(Debug, Eq, PartialEq)]
-pub struct AdsTxt {
-    pub records: Vec<DataRecord>,
-    pub variables: Vec<Variable>,
+fn ads_txt_error<T>(message: &str) -> Result<T> {
+    Err(Box::new(AdsTxtError::new(message)))
 }
 
-#[derive(Debug, Eq, PartialEq)]
-pub struct Variable {
-    pub name: String,
-    pub value: String,
-}
-
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub enum AccountRelation {
     Direct,
     Reseller,
@@ -58,7 +46,7 @@ impl AccountRelation {
     }
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct DataRecord {
     pub domain: String,
     pub publisher_id: String,
@@ -74,8 +62,8 @@ impl DataRecord {
         cert_authority: Option<String>,
     ) -> Self {
         Self {
-            domain: domain.to_string(),
-            publisher_id: publisher_id.to_string(),
+            domain: domain.trim().to_string(),
+            publisher_id: publisher_id.trim().to_string(),
             acc_relation,
             cert_authority,
         }
@@ -102,6 +90,12 @@ impl DataRecord {
     }
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct Variable {
+    pub name: String,
+    pub value: String,
+}
+
 impl Variable {
     pub fn new(name: &str, value: &str) -> Self {
         Self {
@@ -123,10 +117,23 @@ impl Variable {
     }
 }
 
+#[derive(Debug, Eq, PartialEq)]
+pub struct AdsTxt {
+    pub records: Vec<DataRecord>,
+    pub variables: Vec<Variable>,
+}
+
 impl AdsTxt {
     #[inline]
     fn is_comment(line: &str) -> bool {
         line.starts_with("#")
+    }
+
+    pub fn new(records: &[DataRecord], variables: &[Variable]) -> Self {
+        AdsTxt {
+            records: records.to_vec(),
+            variables: variables.to_vec(),
+        }
     }
 
     pub fn parse(text: &str) -> Result<AdsTxt> {
@@ -134,7 +141,9 @@ impl AdsTxt {
         let mut variables: Vec<Variable> = vec![];
 
         for line in text.lines() {
-            if Self::is_comment(line) {
+            let line = line.trim();
+
+            if line.is_empty() || Self::is_comment(line) {
                 continue;
             }
 
@@ -152,6 +161,18 @@ impl AdsTxt {
         }
 
         Ok(AdsTxt { records, variables })
+    }
+
+    pub fn values(&self, name: &str) -> Vec<String> {
+        let mut values = vec![];
+
+        for v in &self.variables {
+            if &v.name == name {
+                values.push(v.value.to_string());
+            }
+        }
+
+        values
     }
 }
 
@@ -224,5 +245,72 @@ mod tests {
             Variable::parse("subdomain=divisionone.example.com"),
             Ok(Variable::new("subdomain", "divisionone.example.com"))
         );
+        assert_eq!(
+            Variable::parse("subdomain=   divisionone.example.com"),
+            Ok(Variable::new("subdomain", "divisionone.example.com"))
+        );
+    }
+
+    #[test]
+    fn parsing_ads_txt() {
+        let ads_txt1 = r"
+        # ads.txt file for example.com:
+        greenadexchange.com, 12345, DIRECT, d75815a79
+        blueadexchange.com, XF436, DIRECT
+        subdomain=divisionone.example.com
+        ";
+
+        let ads_txt2 = r"
+        # ads.txt file for divisionone.example.com:
+        silverssp.com, 5569, DIRECT, f496211
+        orangeexchange.com, AB345, RESELLER
+        ";
+
+        let ads1 = AdsTxt::parse(ads_txt1);
+        let ads2 = AdsTxt::parse(ads_txt2);
+
+        assert_eq!(
+            ads1,
+            Ok(AdsTxt::new(
+                &[
+                    DataRecord::new(
+                        "greenadexchange.com",
+                        "12345",
+                        AccountRelation::Direct,
+                        Some("d75815a79".to_string())
+                    ),
+                    DataRecord::new("blueadexchange.com", "XF436", AccountRelation::Direct, None),
+                ],
+                &[Variable::new("subdomain", "divisionone.example.com")],
+            ))
+        );
+
+        assert_eq!(
+            ads2,
+            Ok(AdsTxt::new(
+                &[
+                    DataRecord::new(
+                        "silverssp.com",
+                        "5569",
+                        AccountRelation::Direct,
+                        Some("f496211".to_string())
+                    ),
+                    DataRecord::new(
+                        "orangeexchange.com",
+                        "AB345",
+                        AccountRelation::Reseller,
+                        None
+                    ),
+                ],
+                &[],
+            ))
+        );
+
+        assert_eq!(
+            ads1.unwrap().values("subdomain"),
+            vec!["divisionone.example.com".to_string()]
+        );
+
+        assert!(ads2.unwrap().values("subdomain").is_empty());
     }
 }
