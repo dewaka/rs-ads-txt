@@ -136,6 +136,10 @@ impl AdsTxt {
         }
     }
 
+    pub fn empty() -> Self {
+        Self::new(&[], &[])
+    }
+
     pub fn parse(text: &str) -> Result<AdsTxt> {
         let mut records: Vec<DataRecord> = vec![];
         let mut variables: Vec<Variable> = vec![];
@@ -161,6 +165,35 @@ impl AdsTxt {
         }
 
         Ok(AdsTxt { records, variables })
+    }
+
+    /// Parses ads.txt file leniently
+    pub fn parse_lenient(text: &str) -> (AdsTxt, Vec<AdsTxtError>) {
+        let mut records: Vec<DataRecord> = vec![];
+        let mut variables: Vec<Variable> = vec![];
+        let mut errors: Vec<AdsTxtError> = vec![];
+
+        for line in text.lines() {
+            let line = line.trim();
+
+            if line.is_empty() || Self::is_comment(line) {
+                continue;
+            }
+
+            if let Ok(record) = DataRecord::parse(line) {
+                records.push(record);
+                continue;
+            }
+
+            if let Ok(variable) = Variable::parse(line) {
+                variables.push(variable);
+                continue;
+            }
+
+            errors.push(AdsTxtError::new(&format!("Invalid ads.txt line: {}", line)));
+        }
+
+        (AdsTxt { records, variables }, errors)
     }
 
     pub fn values(&self, name: &str) -> Vec<String> {
@@ -266,8 +299,16 @@ mod tests {
         orangeexchange.com, AB345, RESELLER
         ";
 
+        // Should fail parsing strict
+        let ads_txt3 = r"
+        # ads.txt file for divisionone.example.com:
+        silverssp.com, 5569
+        orangeexchange.com, AB345, RESELLER
+        ";
+
         let ads1 = AdsTxt::parse(ads_txt1);
         let ads2 = AdsTxt::parse(ads_txt2);
+        let ads3 = AdsTxt::parse(ads_txt3);
 
         assert_eq!(
             ads1,
@@ -307,10 +348,49 @@ mod tests {
         );
 
         assert_eq!(
+            ads3,
+            ads_txt_error("Invalid ads.txt line: silverssp.com, 5569")
+        );
+
+        assert_eq!(
             ads1.unwrap().values("subdomain"),
             vec!["divisionone.example.com".to_string()]
         );
 
         assert!(ads2.unwrap().values("subdomain").is_empty());
+    }
+
+    #[test]
+    fn parsing_ads_txt_leniently() {
+        // Should not fail parsing leniently
+        let ads_txt3 = r"
+        # ads.txt file for divisionone.example.com:
+        silverssp.com, 5569
+        orangeexchange.com, AB345, RESELLER
+        ";
+
+        let ads = AdsTxt::parse_lenient(ads_txt3);
+
+        assert_eq!(
+            ads,
+            (
+                AdsTxt::new(
+                    &[DataRecord::new(
+                        "orangeexchange.com",
+                        "AB345",
+                        AccountRelation::Reseller,
+                        None
+                    ),],
+                    &[],
+                ),
+                vec![AdsTxtError::new(
+                    "Invalid ads.txt line: silverssp.com, 5569"
+                )]
+            )
+        );
+
+        // Empty string should result in an empty AdsTxt and empty error messages list
+        let ads2 = AdsTxt::parse_lenient("");
+        assert_eq!(ads2, (AdsTxt::empty(), vec![]));
     }
 }
