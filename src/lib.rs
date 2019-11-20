@@ -48,9 +48,13 @@ impl AccountRelation {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct DataRecord {
+    /// Domain for which the ads configuration applies
     pub domain: String,
+    /// Publisher id
     pub publisher_id: String,
+    /// Account relation
     pub acc_relation: AccountRelation,
+    /// Optional cert authority
     pub cert_authority: Option<String>,
 }
 
@@ -145,7 +149,7 @@ impl AdsTxt {
         let mut variables: Vec<Variable> = vec![];
 
         for line in text.lines() {
-            let line = line.trim();
+            let line = line.trim_start();
 
             if line.is_empty() || Self::is_comment(line) {
                 continue;
@@ -174,7 +178,7 @@ impl AdsTxt {
         let mut errors: Vec<AdsTxtError> = vec![];
 
         for line in text.lines() {
-            let line = line.trim();
+            let line = line.trim_start();
 
             if line.is_empty() || Self::is_comment(line) {
                 continue;
@@ -206,6 +210,10 @@ impl AdsTxt {
         }
 
         values
+    }
+
+    pub fn sub_domains(&self) -> Vec<String> {
+        self.values("subdomain")
     }
 }
 
@@ -392,5 +400,21 @@ mod tests {
         // Empty string should result in an empty AdsTxt and empty error messages list
         let ads2 = AdsTxt::parse_lenient("");
         assert_eq!(ads2, (AdsTxt::empty(), vec![]));
+    }
+
+    #[test]
+    fn test_subdomains_retrieval() {
+        let ads_txt = r"greenadexchange.com, 12345, DIRECT, d75815a79
+            blueadexchange.com, XF436, DIRECT
+            subdomain=divisionone.example.com";
+
+        let ads = AdsTxt::parse(ads_txt);
+        assert!(ads.is_ok());
+        assert_eq!(ads.unwrap().sub_domains(), vec!("divisionone.example.com"));
+
+        // We should get the same results when parsing leniently
+        let (ads, errors) = AdsTxt::parse_lenient(ads_txt);
+        assert_eq!(ads.sub_domains(), vec!("divisionone.example.com"));
+        assert!(errors.is_empty());
     }
 }
