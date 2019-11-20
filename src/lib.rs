@@ -213,7 +213,27 @@ impl AdsTxt {
     }
 
     pub fn sub_domains(&self) -> Vec<String> {
-        self.values("subdomain")
+        let mut sub_domains = vec![];
+
+        for v in &self.variables {
+            if v.name.eq_ignore_ascii_case("subdomain") {
+                sub_domains.push(v.value.to_string());
+            }
+        }
+
+        sub_domains
+    }
+
+    pub fn contacts(&self) -> Vec<String> {
+        let mut sub_domains = vec![];
+
+        for v in &self.variables {
+            if v.name.eq_ignore_ascii_case("contact") {
+                sub_domains.push(v.value.to_string());
+            }
+        }
+
+        sub_domains
     }
 }
 
@@ -415,6 +435,30 @@ mod tests {
         // We should get the same results when parsing leniently
         let (ads, errors) = AdsTxt::parse_lenient(ads_txt);
         assert_eq!(ads.sub_domains(), vec!("divisionone.example.com"));
+        assert!(errors.is_empty());
+    }
+
+    #[test]
+    fn test_contacts_retrieval() {
+        let ads_txt = r"# ads.txt file for example.com:
+            greenadexchange.com, 12345, DIRECT, d75815a79
+            blueadexchange.com, XF436, DIRECT
+            contact=adops@example.com
+            contact=http://example.com/contact-u";
+
+        let ads = AdsTxt::parse(ads_txt);
+        assert!(ads.is_ok());
+        assert_eq!(
+            ads.unwrap().contacts(),
+            vec!("adops@example.com", "http://example.com/contact-u")
+        );
+
+        // We should get the same results when parsing leniently
+        let (ads, errors) = AdsTxt::parse_lenient(ads_txt);
+        assert_eq!(
+            ads.contacts(),
+            vec!("adops@example.com", "http://example.com/contact-u")
+        );
         assert!(errors.is_empty());
     }
 }
